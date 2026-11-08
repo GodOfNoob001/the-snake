@@ -1,139 +1,128 @@
+"""Игра «Змейка» с меню, выбором скорости, яблоками и препятствиями."""
+
 from random import choice, randint
 
-import pygame
+import pygame as pg
 
-# Константы для размеров поля и сетки:
 SCREEN_WIDTH, SCREEN_HEIGHT = 640, 480
 GRID_SIZE = 20
 GRID_WIDTH = SCREEN_WIDTH // GRID_SIZE
 GRID_HEIGHT = SCREEN_HEIGHT // GRID_SIZE
+CENTER_POSITION = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+ALL_POSITIONS = frozenset(
+    (x, y)
+    for x in range(0, SCREEN_WIDTH, GRID_SIZE)
+    for y in range(0, SCREEN_HEIGHT, GRID_SIZE)
+)
 
-# Направления движения:
 UP = (0, -1)
 DOWN = (0, 1)
 LEFT = (-1, 0)
 RIGHT = (1, 0)
+OPPOSITE_DIRECTIONS = {UP: DOWN, DOWN: UP, LEFT: RIGHT, RIGHT: LEFT}
+KEY_DIRECTIONS = {
+    pg.K_UP: UP,
+    pg.K_DOWN: DOWN,
+    pg.K_LEFT: LEFT,
+    pg.K_RIGHT: RIGHT,
+    pg.K_w: UP,
+    pg.K_s: DOWN,
+    pg.K_a: LEFT,
+    pg.K_d: RIGHT,
+}
 
-# Цвет фона - черный:
-BOARD_BACKGROUND_COLOR = (0, 0, 0)
-
-# Цвет границы ячейки
-BORDER_COLOR = (93, 216, 228)
-
-# Цвет яблока
+BOARD_BACKGROUND_COLOR = (225, 225, 225)
+BORDER_COLOR = (75, 95, 105)
 APPLE_COLOR = (255, 0, 0)
+SNAKE_COLOR = (30, 150, 70)
+OBSTACLE_COLOR = (100, 110, 125)
+TEXT_COLOR = (30, 40, 50)
+BUTTON_COLOR = (190, 210, 220)
 
-# Цвет змейки
-SNAKE_COLOR = (0, 255, 0)
-
-OBSTACLE_COLOR = (135, 145, 160)
-
-TEXT_COLOR = (235, 240, 245)
-
-BUTTON_COLOR = (35, 65, 75)
-# Скорость движения змейки:
 SPEED = 20
 MIN_SPEED = 5
 MAX_SPEED = 30
 SPEED_STEP = 5
+MENU_FPS = 30
+MAX_APPLES = 5
 OBSTACLE_COUNT = 8
 SAFE_DISTANCE = 3 * GRID_SIZE
-MAX_APPLES = 5
-MENU_FPS = 30
+START_SAFE_POSITIONS = frozenset(
+    (x, y) for x, y in ALL_POSITIONS
+    if abs(x - CENTER_POSITION[0]) <= SAFE_DISTANCE
+    and abs(y - CENTER_POSITION[1]) <= SAFE_DISTANCE
+)
 
-# Настройка игрового окна:
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), 0, 32)
-
-# Заголовок окна игрового поля:
-pygame.display.set_caption('Змейка')
-
-# Настройка времени:
-clock = pygame.time.Clock()
+screen = pg.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), 0, 32)
+pg.display.set_caption('Змейка | Esc — выход')
+clock = pg.time.Clock()
 
 
-def get_free_positions(occupied_positions):
-    """Собрать координаты всех свободных клеток поля."""
-    occupied = set(occupied_positions)
-    free_positions = []
-    for x in range(GRID_WIDTH):
-        for y in range(GRID_HEIGHT):
-            position = (x * GRID_SIZE, y * GRID_SIZE)
-            if position is not occupied:
-                free_positions.append(position)
-    return free_positions
-
-
-# Тут опишите все классы игры.
 class GameObject:
     """Объект игрового поля с позицией и цветом."""
 
     def __init__(self, body_color=BOARD_BACKGROUND_COLOR):
-        self.position = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
+        self.position = CENTER_POSITION
         self.body_color = body_color
 
     def draw(self):
-        """Нарисовать одну клетку объекта с границей."""
-        self.draw_cell(self.position)
+        """Задать интерфейс отрисовки для игровых объектов."""
 
-    def draw_cell(self, position):
-        """Нарисовать клетку по заданным координатам цветом объекта."""
-        rect = pygame.Rect(position, (GRID_SIZE, GRID_SIZE))
-        pygame.draw.rect(screen, self.body_color, rect)
-        pygame.draw.rect(screen, BORDER_COLOR, rect, 1)
+    def draw_cell(self, position, body_color=None):
+        """Закрасить клетку, добавив рамку только при необходимости."""
+        color = self.body_color if body_color is None else body_color
+        rect = pg.Rect(position, (GRID_SIZE, GRID_SIZE))
+        pg.draw.rect(screen, color, rect)
+        if color not in (BOARD_BACKGROUND_COLOR, BORDER_COLOR):
+            pg.draw.rect(screen, BORDER_COLOR, rect, 1)
 
 
 class Apple(GameObject):
-    """Яблоко, которое появляется на свободной клетке поля."""
+    """Одноклеточный объект: яблоко или препятствие в зависимости от цвета."""
 
-    def __init__(self, occupied_positions=()):
-        super().__init__(APPLE_COLOR)
+    def __init__(self, occupied_positions=(), body_color=APPLE_COLOR):
+        super().__init__(body_color)
         self.randomize_position(occupied_positions)
 
     def randomize_position(self, occupied_positions=()):
-        """Выбрать случайную клетку, не занятую змейкой."""
-        free_positions = get_free_positions(occupied_positions)
-        if free_positions:
-            self.position = choice(free_positions)
-        else:
-            self.position = None
+        """Выбрать позицию, если на поле есть хотя бы одна свободная клетка."""
+        self.position = choice(tuple(ALL_POSITIONS - set(occupied_positions)))
 
     def draw(self):
-        """Нарисовать яблоко, если на поле есть свободное место."""
-        if self.position is not None:
-            super().draw()
+        """Нарисовать одну клетку объекта."""
+        self.draw_cell(self.position)
 
 
 class Snake(GameObject):
     """Змейка, хранящая сегменты от головы к хвосту."""
 
-    def __init__(self):
-        super().__init__(SNAKE_COLOR)
+    def __init__(self, body_color=SNAKE_COLOR):
+        super().__init__(body_color)
         self.reset()
 
     def get_head_position(self):
         """Вернуть координаты головы змейки."""
         return self.positions[0]
 
-    def update_direction(self):
-        """Применить допустимый поворот перед следующим шагом."""
-        if self.next_direction is not None:
-            opposite = (-self.direction[0], -self.direction[1])
-            if self.next_direction != opposite:
-                self.direction = self.next_direction
-            self.next_direction = None
+    def update_direction(self, new_direction):
+        """Применить поворот без разворота назад; вернуть признак изменения."""
+        if new_direction in (self.direction,
+                             OPPOSITE_DIRECTIONS[self.direction]):
+            return False
+        self.direction = new_direction
+        return True
 
     def move(self):
         """Сдвинуть голову на клетку и перенести её через границу поля."""
         x, y = self.get_head_position()
         dx, dy = self.direction
-        self.position = (
+        self.positions.insert(0, (
             (x + dx * GRID_SIZE) % SCREEN_WIDTH,
             (y + dy * GRID_SIZE) % SCREEN_HEIGHT,
+        ))
+        self.last = (
+            self.positions.pop() if len(self.positions) > self.length else None
         )
-        self.positions.insert(0, self.position)
-        self.last = None
-        if len(self.positions) > self.length:
-            self.last = self.positions.pop()
 
     def grow(self):
         """Увеличить длину, сохранив хвост текущего шага."""
@@ -144,62 +133,37 @@ class Snake(GameObject):
 
     def reset(self):
         """Начать новую игру с одним сегментом в центре поля."""
-        self.position = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
-        self.positions = [self.position]
+        self.positions = [CENTER_POSITION]
         self.length = 1
         self.direction = choice((UP, DOWN, LEFT, RIGHT))
-        self.next_direction = None
         self.last = None
 
     def draw(self):
-        """Нарисовать все сегменты змейки."""
-        for position in self.positions:
-            self.draw_cell(position)
-
-
-class Obstacle(GameObject):
-    """Неподвижное препятствие размером в одну клетку."""
-
-    def __init__(self, position):
-        super().__init__(OBSTACLE_COLOR)
-
-
-def create_obstacles(snake):
-    """Разместить препятствия, оставив свободную зону вокруг старта."""
-    head_x, head_y = snake.get_head_position()
-    free_positions = get_free_positions(snake.positions)
-    candidates = []
-    for x, y in free_positions:
-        if abs(x - head_x) > SAFE_DISTANCE:
-            candidates.append((x, y))
-        elif abs(y - head_y) > SAFE_DISTANCE:
-            candidates.append((x, y))
-    obstacles = []
-    for _ in range(min(OBSTACLE_COUNT, len(candidates))):
-        position = choice(candidates)
-        candidates.remove(position)
-        obstacles.append(Obstacle(position))
-    return obstacles
+        """Стереть освободившийся хвост и нарисовать новую голову."""
+        if self.last is not None:
+            self.draw_cell(self.last, BOARD_BACKGROUND_COLOR)
+        self.draw_cell(self.get_head_position())
 
 
 def create_apples(snake, obstacles):
-    """Создать случайное количество яблок на свободных клетках."""
-    occupied = snake.positions.copy()
+    """Создать случайную партию яблок на свободных клетках."""
+    occupied = set(snake.positions)
     for obstacle in obstacles:
-        occupied.append(obstacle.position)
-    count = min(randint(1, MAX_APPLES), len(get_free_positions(occupied)))
+        occupied.add(obstacle.position)
+
+    count = min(randint(1, MAX_APPLES), len(ALL_POSITIONS - occupied))
     apples = []
     for _ in range(count):
         apple = Apple(occupied)
         apples.append(apple)
-        occupied.append(apple.position)
+        occupied.add(apple.position)
     return apples
 
 
 def has_collision(snake, obstacles):
     """Проверить столкновение головы с телом или препятствием."""
     head = snake.get_head_position()
-    if head in snake.positions[1:]:
+    if head in snake.positions[2:]:
         return True
     for obstacle in obstacles:
         if head == obstacle.position:
@@ -207,50 +171,34 @@ def has_collision(snake, obstacles):
     return False
 
 
-def quit_game():
-    """Закрыть окно и завершить программу."""
-    pygame.quit
-    raise SystemExit
-
-
-def handle_keys(game_object):
+def handle_keys(snake):
     """Обработать выход и выбрать не более одного поворота за шаг."""
-    directions = {
-        pygame.K_UP: UP,
-        pygame.K_DOWN: DOWN,
-        pygame.K_LEFT: LEFT,
-        pygame.K_RIGHT: RIGHT,
-    }
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            pygame.quit()
+    turned = False
+    for event in pg.event.get():
+        if event.type == pg.QUIT:
             raise SystemExit
-        if event.type != pygame.KEYDOWN:
+        if event.type != pg.KEYDOWN:
             continue
-        if event.key not in directions:
+        if event.key == pg.K_ESCAPE:
+            raise SystemExit
+        if event.key not in KEY_DIRECTIONS or turned:
             continue
-        if game_object.next_direction is not None:
-            continue
-
-        direction = directions[event.key]
-        opposite = (-game_object.direction[0], -game_object.direction[1])
-        if direction != game_object.direction and direction != opposite:
-            game_object.next_direction = direction
+        turned = snake.update_direction(KEY_DIRECTIONS[event.key])
 
 
 def get_menu_action(event, buttons):
     """Определить действие по клику или нажатию клавиши в меню."""
-    if event.type == pygame.QUIT:
-        quit_game()
-    if event.type == pygame.KEYDOWN:
+    if event.type == pg.QUIT:
+        return 'quit'
+    if event.type == pg.KEYDOWN:
         actions = {
-            pygame.K_RETURN: 'start',
-            pygame.K_ESCAPE: 'quit',
-            pygame.K_LEFT: 'slower',
-            pygame.K_RIGHT: 'faster',
+            pg.K_RETURN: 'start',
+            pg.K_ESCAPE: 'quit',
+            pg.K_LEFT: 'slower',
+            pg.K_RIGHT: 'faster',
         }
         return actions.get(event.key)
-    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+    if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
         for action, rect in buttons.items():
             if rect.collidepoint(event.pos):
                 return action
@@ -258,7 +206,7 @@ def get_menu_action(event, buttons):
 
 
 def draw_text(text, font, center):
-    """Написать текст с центром в заданной точке."""
+    """Нарисовать текст меню с центром в заданной точке."""
     image = font.render(text, True, TEXT_COLOR)
     screen.blit(image, image.get_rect(center=center))
 
@@ -273,18 +221,19 @@ def draw_menu(buttons, speed, score, font, title_font, small_font):
         title = 'Игра окончена'
         subtitle = f'Твой счёт: {score}'
         start_label = 'Начать сначала'
+
     draw_text(title, title_font, (SCREEN_WIDTH // 2, 70))
     draw_text(subtitle, small_font, (SCREEN_WIDTH // 2, 125))
     draw_text(f'Скорость: {speed}', font, (SCREEN_WIDTH // 2, 192))
     labels = {
         'start': start_label,
         'quit': 'Выход',
-        'slower': '-',
+        'slower': '−',
         'faster': '+',
     }
     for action, rect in buttons.items():
-        pygame.draw.rect(screen, BUTTON_COLOR, rect)
-        pygame.draw.rect(screen, BORDER_COLOR, rect, 1)
+        pg.draw.rect(screen, BUTTON_COLOR, rect)
+        pg.draw.rect(screen, BORDER_COLOR, rect, 1)
         draw_text(labels[action], font, rect.center)
     draw_text('Enter — начать, ← / → — скорость, Esc — выход',
               small_font, (SCREEN_WIDTH // 2, 430))
@@ -292,22 +241,22 @@ def draw_menu(buttons, speed, score, font, title_font, small_font):
 
 def show_menu(speed, score=None):
     """Дождаться старта и вернуть выбранную скорость движения."""
-    pygame.display.set_caption('Змейка — меню')
-    font = pygame.font.SysFont('arial', 28)
-    title_font = pygame.font.SysFont('arial', 46)
-    small_font = pygame.font.SysFont('arial', 20)
+    pg.display.set_caption('Змейка — меню | Enter — старт | Esc — выход')
+    font = pg.font.SysFont('arial', 28)
+    title_font = pg.font.SysFont('arial', 46)
+    small_font = pg.font.SysFont('arial', 20)
     buttons = {
-        'start': pygame.Rect(150, 250, 340, 60),
-        'quit': pygame.Rect(150, 330, 340, 60),
-        'slower': pygame.Rect(135, 170, 50, 45),
-        'faster': pygame.Rect(455, 170, 50, 45),
+        'start': pg.Rect(150, 250, 340, 60),
+        'quit': pg.Rect(150, 330, 340, 60),
+        'slower': pg.Rect(135, 170, 50, 45),
+        'faster': pg.Rect(455, 170, 50, 45),
     }
     while True:
         clock.tick(MENU_FPS)
-        for event in pygame.event.get():
+        for event in pg.event.get():
             action = get_menu_action(event, buttons)
             if action == 'quit':
-                quit_game()
+                raise SystemExit
             if action == 'start':
                 return speed
             if action == 'slower':
@@ -316,12 +265,11 @@ def show_menu(speed, score=None):
                 speed = min(MAX_SPEED, speed + SPEED_STEP)
 
         draw_menu(buttons, speed, score, font, title_font, small_font)
-        pygame.display.update()
+        pg.display.update()
 
 
 def play_step(snake, apples, obstacles):
     """Выполнить шаг игры и сообщить, можно ли продолжать раунд."""
-    snake.update_direction()
     snake.move()
     if has_collision(snake, obstacles):
         return False
@@ -338,34 +286,43 @@ def play_step(snake, apples, obstacles):
 
 def draw_game(snake, apples, obstacles, speed):
     """Обновить игровое поле и показать счёт в заголовке окна."""
-    screen.fill(BOARD_BACKGROUND_COLOR)
     for obstacle in obstacles:
         obstacle.draw()
     for apple in apples:
         apple.draw()
     snake.draw()
-    pygame.display.set_caption(
+    pg.display.set_caption(
         f'Змейка | Счёт: {snake.length - 1} | Скорость: {speed}'
+        ' | Стрелки / WASD | Esc — выход'
     )
-    pygame.display.update()
+    pg.display.update()
 
 
 def main():
-    """Инициализация PyGame"""
-    pygame.init()
-    speed = show_menu(SPEED)
-    # Тут нужно создать экземпляры классов.
-
-    while True:
-        snake = Snake()
-        obstacles = create_obstacles(snake)
-        apples = create_apples(snake, obstacles)
-        playing = True
-        while playing:
-            clock.tick(speed)
-            handle_keys(snake)
-            playing = play_step(snake, apples, obstacles)
+    """Показать меню, запустить раунд и предложить повтор после проигрыша."""
+    pg.init()
+    try:
+        speed = show_menu(SPEED)
+        while True:
+            snake = Snake()
+            occupied = set(snake.positions) | START_SAFE_POSITIONS
+            obstacles = []
+            for _ in range(min(OBSTACLE_COUNT, len(ALL_POSITIONS - occupied))):
+                obstacle = Apple(occupied, OBSTACLE_COLOR)
+                obstacles.append(obstacle)
+                occupied.add(obstacle.position)
+            apples = create_apples(snake, obstacles)
+            screen.fill(BOARD_BACKGROUND_COLOR)
             draw_game(snake, apples, obstacles, speed)
+            playing = True
+            while playing:
+                clock.tick(speed)
+                handle_keys(snake)
+                playing = play_step(snake, apples, obstacles)
+                draw_game(snake, apples, obstacles, speed)
+            speed = show_menu(speed, snake.length - 1)
+    finally:
+        pg.quit()
 
 
 if __name__ == '__main__':
